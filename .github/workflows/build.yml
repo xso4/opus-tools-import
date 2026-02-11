@@ -1,0 +1,288 @@
+name: Build Windows Static Binary
+
+on:
+  schedule:
+    - cron: '32 18 15 * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+env:
+  DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      should_run: ${{ steps.check_updates.outputs.should_run }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Check for updates
+        id: check_updates
+        run: python .github/scripts/check_updates.py
+
+  build-deps:
+    needs: check
+    if: needs.check.outputs.should_run == 'true'
+    runs-on: windows-latest
+    outputs:
+      sha_opus: ${{ steps.ver.outputs.opus }}
+      sha_flac: ${{ steps.ver.outputs.flac }}
+      sha_ogg: ${{ steps.ver.outputs.ogg }}
+      sha_libopusenc: ${{ steps.ver.outputs.libopusenc }}
+      sha_opusfile: ${{ steps.ver.outputs.opusfile }}
+      short_sha_opus: ${{ steps.ver.outputs.short_opus }}
+    steps:
+      - uses: actions/checkout@v4
+      
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            base-devel
+            git
+            mingw-w64-x86_64-toolchain
+            mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-autotools
+            mingw-w64-x86_64-gcc
+
+      - name: Read Versions & Export Variables
+        id: ver
+        shell: bash
+        run: |
+          eval "$(python - <<'PY'
+          import json
+          d = json.load(open('.github/upstream-version.json'))["repositories"]
+          repos = ["ogg", "opus", "flac", "libopusenc", "opusfile"]
+          for r in repos:
+              url = d[r]["url"]
+              key = r.upper().replace("-", "_") + "_URL"
+              print(f'{key}="{url}"')
+          PY
+          )"
+          mkdir -p build_work
+          cd build_work
+          
+          for repo in ogg opus flac libopusenc opusfile; do
+             url_var=$(echo "${repo^^}_URL" | tr '-' '_')
+             url="${!url_var}"
+             echo "Cloning $repo from $url..."
+             git clone "$url" "$repo"
+             cd $repo
+             FULL_SHA=$(git rev-parse HEAD)
+             SHORT_SHA=${FULL_SHA:0:7}
+             echo "$repo=$FULL_SHA" >> "$GITHUB_OUTPUT"
+             if [ "$repo" = "opus" ]; then
+                echo "short_opus=$SHORT_SHA" >> "$GITHUB_OUTPUT"
+             fi
+             cd ..
+          done
+
+      - name: Build Dependencies
+        shell: msys2 {0}
+        run: |
+          export CFLAGS="-O2 -static-libgcc -static-libstdc++"
+          export CXXFLAGS="-O2 -static-libgcc -static-libstdc++"
+          export PREFIX="$(pwd)/install_dir"
+          mkdir -p $PREFIX
+          
+          export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig"
+          export CPPFLAGS="-I$PREFIX/include"
+          export LDFLAGS="-L$PREFIX/lib"
+
+          cd build_work
+          
+          echo "Building Ogg..."
+          cd ogg
+          ./autogen.sh
+          git reset --hard
+          ./configure --prefix=$PREFIX --enable-static --disable-shared
+          make -j$(nproc)
+          make install
+          cd ..
+          
+          echo "Building Opus..."
+          cd opus
+          ./autogen.sh
+          git reset --hard
+          ./configure --prefix=$PREFIX --enable-static --disable-shared
+          make -j$(nproc)
+          make install
+          cd ..
+          
+          echo "Building FLAC..."
+          cd flac
+          cmake -S . -B build -G "MSYS Makefiles" -DCMAKE_INSTALL_PREFIX=$PREFIX -DBUILD_SHARED_LIBS=OFF -DBUILD_PROGRAMS=OFF -DBUILD_TESTING=OFF -DINSTALL_MANPAGES=OFF -DWITH_OGG=ON -DOGG_ROOT=$PREFIX
+          cmake --build build -- -j$(nproc)
+          cmake --build build --target install
+          cd ..
+          
+          echo "Building Libopusenc..."
+          cd libopusenc
+          ./autogen.sh
+          git reset --hard
+          ./configure --prefix=$PREFIX --enable-static --disable-shared
+          make -j$(nproc)
+          make install
+          cd ..
+          
+          echo "Building Opusfile..."
+          cd opusfile
+          ./autogen.sh
+          git reset --hard
+          ./configure --prefix=$PREFIX --enable-static --disable-shared --disable-http
+          make -j$(nproc)
+          make install
+          cd ..
+
+      - name: Package Dependencies
+        run: |
+          7z a deps.zip ./install_dir/*
+
+      - name: Upload Dependencies
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-deps
+          path: deps.zip
+          retention-days: 1
+
+  build-tools:
+    needs: [check, build-deps]
+    if: needs.check.outputs.should_run == 'true'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.DEFAULT_BRANCH }}
+          
+      - name: Clone upstream source
+        shell: powershell
+        run: |
+          $ls = git ls-remote --symref https://github.com/xiph/opus-tools.git HEAD
+          $refLine = ($ls -split "`n" | Where-Object { $_ -match '^ref: refs/heads/' })
+          if (-not $refLine) { Write-Error "Failed to detect upstream default branch"; exit 1 }
+          $upstreamBranch = ($refLine -replace '^ref: refs/heads/','' -replace '\s+HEAD$','').Trim()
+          
+          # 删除本地自带的 src 目录，确保克隆到干净的 src
+          if (Test-Path "src") { Remove-Item -Recurse -Force src }
+          git clone --branch $upstreamBranch https://github.com/xiph/opus-tools.git src
+
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            base-devel
+            git
+            mingw-w64-x86_64-toolchain
+            mingw-w64-x86_64-autotools
+
+      - name: Download Dependencies
+        uses: actions/download-artifact@v4
+        with:
+          name: build-deps
+          path: .
+
+      - name: Extract Dependencies
+        run: |
+          7z x deps.zip -o"./install_dir"
+
+      - name: Build Opus-Tools
+        shell: msys2 {0}
+        run: |
+          export PREFIX="$(pwd)/install_dir"
+          export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig"
+          export PKG_CONFIG="pkg-config --static"
+          export CFLAGS="-O2 -static-libgcc -static-libstdc++ -I$PREFIX/include -DFLAC__NO_DLL -Dfopen_utf8=opus_fopen_utf8 -Dunlink_utf8=opus_unlink_utf8"
+          export LDFLAGS="-L$PREFIX/lib -static"
+          
+          cd src
+          ./autogen.sh
+          git reset --hard
+          ./configure --prefix=$PREFIX --enable-static --disable-shared --with-flac
+          
+          make -j$(nproc)
+          
+          ls -l *.exe
+          
+          mkdir ../release
+          cp opusenc.exe ../release/
+          cp opusdec.exe ../release/
+          cp opusinfo.exe ../release/
+
+      - name: Install Documentation Tools
+        shell: powershell
+        run: |
+          choco install pandoc --no-progress
+          choco install wkhtmltopdf --no-progress
+          $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
+
+      - name: Generate Documentation
+        shell: powershell
+        run: |
+          $outDir = Join-Path $pwd "release"
+          Get-ChildItem -Path "src\man\*.1" | ForEach-Object {
+            $base = $_.BaseName
+            $source = $_.FullName
+            Write-Host "Processing $source..."
+            pandoc $source -f man -t html -s -o (Join-Path $outDir "$base.html")
+            pandoc $source -f man -t plain -o (Join-Path $outDir "$base.txt")
+            pandoc $source -f man -o (Join-Path $outDir "$base.pdf") --pdf-engine=wkhtmltopdf
+            pandoc $source -f man -t markdown -s -o (Join-Path $outDir "$base.md")
+          }
+
+      - name: Get Versions & Create Package
+        id: pkg
+        shell: bash
+        run: |
+          cd src
+          OPUS_TOOLS_SHA=$(git rev-parse HEAD)
+          OPUS_TOOLS_SHORT=${OPUS_TOOLS_SHA:0:7}
+          cd ..
+          
+          SHA_OPUS="${{ needs.build-deps.outputs.short_sha_opus }}"
+          SHA_OPUS=${SHA_OPUS:0:7}
+          
+          DATE=$(date +'%Y-%m-%d')
+          ZIP_NAME="${DATE}_opus-tools-${OPUS_TOOLS_SHORT}_opus-${SHA_OPUS}.zip"
+          echo "ZIP_NAME=$ZIP_NAME" >> $GITHUB_ENV
+          echo "TAG_NAME=${DATE}_${OPUS_TOOLS_SHORT}" >> $GITHUB_ENV
+          echo "SHA_OPUS_TOOLS=$OPUS_TOOLS_SHA" >> $GITHUB_ENV
+          
+          cd release
+          7z a "../$ZIP_NAME" *
+
+      - name: Update upstream-version.json & Generate Notes
+        env:
+          SHA_OPUS: ${{ needs.build-deps.outputs.sha_opus }}
+          SHA_FLAC: ${{ needs.build-deps.outputs.sha_flac }}
+          SHA_OGG: ${{ needs.build-deps.outputs.sha_ogg }}
+          SHA_LIBOPUSENC: ${{ needs.build-deps.outputs.sha_libopusenc }}
+          SHA_OPUSFILE: ${{ needs.build-deps.outputs.sha_opusfile }}
+          SHA_OPUS_TOOLS: ${{ env.SHA_OPUS_TOOLS }}
+        run: |
+          python .github/scripts/update_versions.py
+
+      - name: Commit and Push upstream-version.json
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add .github/upstream-version.json
+          git commit -m "Update upstream-version.json [skip ci]" || echo "No changes to commit"
+          git remote set-url origin "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git"
+          git push origin ${{ env.DEFAULT_BRANCH }}
+
+      - name: Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: ${{ env.ZIP_NAME }}
+          tag_name: ${{ env.TAG_NAME }}
+          body_path: release_notes.md
