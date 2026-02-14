@@ -6,15 +6,15 @@ on:
   workflow_dispatch:
     inputs:
       upstream_repo:
-        description: Upstream repository URL
+        description: 上游地址
         required: false
         type: string
       upstream_branch:
-        description: Upstream branch to sync
+        description: 上游分支
         required: false
         type: string
       origin_branch:
-        description: Origin branch to sync
+        description: 本仓库分支
         required: false
         type: string
 
