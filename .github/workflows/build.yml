@@ -303,7 +303,21 @@ jobs:
               
               # Enable XML generation for Moxygen
               content += '\nGENERATE_XML = YES\n'
-              content += 'XML_OUTPUT = xml\n' 
+              content += 'XML_OUTPUT = xml\n'
+              
+              # Optimize for comprehensive documentation
+              # Extract all entities, including static and private
+              content += 'EXTRACT_ALL = YES\n'
+              content += 'EXTRACT_PRIVATE = YES\n'
+              content += 'EXTRACT_STATIC = YES\n'
+              
+              # Ensure recursive scanning if not already set
+              content += 'RECURSIVE = YES\n'
+              
+              # Expand all macros to ensure full API coverage
+              content += 'MACRO_EXPANSION = YES\n'
+              content += 'EXPAND_ONLY_PREDEF = NO\n'
+              content += 'ENABLE_PREPROCESSING = YES\n'
               
               with open('doc/Doxyfile', 'w') as f:
                   f.write(content)
