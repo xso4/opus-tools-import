@@ -2,7 +2,6 @@ import json
 import os
 import subprocess
 import sys
-from datetime import datetime
 
 def get_remote_head(url):
     try:
@@ -31,12 +30,26 @@ def main():
     updates_found = False
     
     print("Checking for updates...")
+    
+    # Prepare output file
+    if "GITHUB_OUTPUT" in os.environ:
+        output_file = open(os.environ["GITHUB_OUTPUT"], "a")
+    else:
+        output_file = sys.stdout
+
     for name, repo_data in data["repositories"].items():
         current_hash = repo_data["commit"]
         remote_url = repo_data["url"]
         
         print(f"Checking {name} ({remote_url})...")
         latest_hash = get_remote_head(remote_url)
+        
+        # Output SHA
+        key = f"sha_{name.replace('-', '_')}"
+        if output_file != sys.stdout:
+            output_file.write(f"{key}={latest_hash}\n")
+        else:
+            print(f"OUTPUT: {key}={latest_hash}")
         
         if latest_hash != current_hash:
             print(f"  UPDATE FOUND: {name} {current_hash[:7]} -> {latest_hash[:7]}")
@@ -45,9 +58,11 @@ def main():
             print(f"  Up to date: {latest_hash[:7]}")
 
     should_run = is_manual or updates_found
-    
-    with open(os.environ["GITHUB_OUTPUT"], "a") as f:
-        f.write(f"should_run={str(should_run).lower()}\n")
+    if output_file != sys.stdout:
+        output_file.write(f"should_run={str(should_run).lower()}\n")
+        output_file.close()
+    else:
+        print(f"OUTPUT: should_run={str(should_run).lower()}")
         
     print(f"\nSummary: Manual={is_manual}, Updates={updates_found} => Run={should_run}")
 
