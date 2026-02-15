@@ -247,7 +247,7 @@ jobs:
       - name: Install Documentation Tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y doxygen pandoc
+          sudo apt-get install -y doxygen pandoc npm autoconf automake libtool
           sudo npm install -g moxygen
 
       - name: Clone Opus & Generate Docs
@@ -258,74 +258,33 @@ jobs:
           cd opus
           git checkout $OPUS_SHA
           
-          # Generate Doxyfile using Python for better reliability
-          python3 -c "
-          import os
-          import subprocess
-          import sys
-
-          def get_version():
-              # Try running update_version script
-              if os.path.exists('./update_version'):
-                  try:
-                      # update_version writes to package_version file or stdout
-                      # It seems it updates package_version file.
-                      # Let's try executing it.
-                      subprocess.run(['sh', './update_version'], check=False)
-                  except Exception:
-                      pass
-              
-              # Read package_version if exists
-              if os.path.exists('package_version'):
-                  try:
-                      with open('package_version', 'r') as f:
-                          for line in f:
-                              if 'PACKAGE_VERSION=' in line:
-                                  return line.split('=')[1].strip().strip('\"')
-                  except Exception:
-                      pass
-              
-              # Fallback to git sha
-              return os.environ.get('OPUS_SHA', 'unknown')
-
-          version = get_version()
-          print(f'Detected Opus version: {version}')
-
-          if os.path.exists('doc/Doxyfile.in'):
-              with open('doc/Doxyfile.in', 'r') as f:
-                  content = f.read()
-              
-              content = content.replace('@VERSION@', version)
-              content = content.replace('@top_srcdir@', '..')
-              content = content.replace('@top_builddir@', '..')
-              content = content.replace('@HAVE_DOT@', 'NO')
-              content = content.replace('@DOT_PATH@', '')
-              
-              # Enable XML generation for Moxygen
-              content += '\nGENERATE_XML = YES\n'
-              content += 'XML_OUTPUT = xml\n'
-              
-              # Optimize for comprehensive documentation
-              # Extract all entities, including static and private
-              content += 'EXTRACT_ALL = YES\n'
-              content += 'EXTRACT_PRIVATE = YES\n'
-              content += 'EXTRACT_STATIC = YES\n'
-              
-              # Ensure recursive scanning if not already set
-              content += 'RECURSIVE = YES\n'
-              
-              # Expand all macros to ensure full API coverage
-              content += 'MACRO_EXPANSION = YES\n'
-              content += 'EXPAND_ONLY_PREDEF = NO\n'
-              content += 'ENABLE_PREPROCESSING = YES\n'
-              
-              with open('doc/Doxyfile', 'w') as f:
-                  f.write(content)
-          else:
-              print('Error: doc/Doxyfile.in not found')
-              sys.exit(1)
-          "
+          # Initialize build system to generate Doxyfile correctly
+          ./autogen.sh
+          ./configure --enable-doc
           
+          # Configure Doxyfile for XML generation (required for moxygen)
+          if [ -f doc/Doxyfile ]; then
+              echo "Modifying Doxyfile for XML generation..."
+              cat >> doc/Doxyfile <<EOF
+          
+          # Added for Moxygen support
+          GENERATE_XML = YES
+          XML_OUTPUT = xml
+          
+          # Ensure full API coverage
+          EXTRACT_ALL = YES
+          EXTRACT_PRIVATE = YES
+          EXTRACT_STATIC = YES
+          RECURSIVE = YES
+          MACRO_EXPANSION = YES
+          EXPAND_ONLY_PREDEF = NO
+          EOF
+          else
+              echo "Error: doc/Doxyfile not found after configure"
+              exit 1
+          fi
+          
+          # Build documentation
           cd doc
           doxygen
           
