@@ -1,4 +1,4 @@
-name: Build Windows Static/Shared Binary
+name: Build Opus Tools
 
 on:
   schedule:
@@ -7,110 +7,36 @@ on:
 
 permissions:
   contents: write
+
 env:
   DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
 
 jobs:
-  check:
+  check-get-versions:
     runs-on: ubuntu-latest
     outputs:
-      should_run: ${{ steps.check_updates.outputs.should_run }}
+      should_run: ${{ steps.check.outputs.should_run }}
+      sha_opus: ${{ steps.check.outputs.sha_opus }}
+      sha_opusfile: ${{ steps.check.outputs.sha_opusfile }}
+      sha_libopusenc: ${{ steps.check.outputs.sha_libopusenc }}
+      sha_ogg: ${{ steps.check.outputs.sha_ogg }}
+      sha_flac: ${{ steps.check.outputs.sha_flac }}
+      sha_opus_tools: ${{ steps.check.outputs.sha_opus_tools }}
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.x'
-
-      - name: Check for updates
-        id: check_updates
+      - name: Check Updates
+        id: check
         run: python .github/scripts/check_updates.py
 
-  get-versions:
-    needs: check
-    if: needs.check.outputs.should_run == 'true'
-    runs-on: ubuntu-latest
-    outputs:
-      ogg_url: ${{ steps.ver.outputs.ogg_url }}
-      ogg_sha: ${{ steps.ver.outputs.ogg_sha }}
-      flac_url: ${{ steps.ver.outputs.flac_url }}
-      flac_sha: ${{ steps.ver.outputs.flac_sha }}
-      opus_url: ${{ steps.ver.outputs.opus_url }}
-      opus_sha: ${{ steps.ver.outputs.opus_sha }}
-      short_opus_sha: ${{ steps.ver.outputs.short_opus_sha }}
-      libopusenc_url: ${{ steps.ver.outputs.libopusenc_url }}
-      libopusenc_sha: ${{ steps.ver.outputs.libopusenc_sha }}
-      opusfile_url: ${{ steps.ver.outputs.opusfile_url }}
-      opusfile_sha: ${{ steps.ver.outputs.opusfile_sha }}
-      opus_tools_sha: ${{ steps.ver.outputs.opus_tools_sha }}
-      opus_tools_branch: ${{ steps.ver.outputs.opus_tools_branch }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Read Versions & Get SHA
-        id: ver
-        run: |
-          # Function to get default branch and SHA
-          get_repo_info() {
-            local name=$1
-            local url=$2
-            local output_prefix=$3
-            
-            echo "Getting info for $name from $url..."
-            
-            # Get default branch (HEAD ref)
-            local ls_remote=$(git ls-remote --symref "$url" HEAD)
-            local ref_line=$(echo "$ls_remote" | grep '^ref: refs/heads/')
-            local default_branch=$(echo "$ref_line" | sed 's/^ref: refs\/heads\///;s/[[:space:]]*HEAD$//')
-            local head_sha=$(echo "$ls_remote" | head -n1 | awk '{print $2}')
-            
-            if [ -z "$head_sha" ]; then
-                # Fallback if symref fails (some servers don't support it)
-                head_sha=$(git ls-remote "$url" HEAD | awk '{print $1}')
-            fi
-
-            echo "${output_prefix}_url=$url" >> "$GITHUB_OUTPUT"
-            echo "${output_prefix}_sha=$head_sha" >> "$GITHUB_OUTPUT"
-            if [ "$name" == "opus" ]; then
-                echo "short_opus_sha=${head_sha:0:7}" >> "$GITHUB_OUTPUT"
-            fi
-            if [ "$name" == "opus-tools" ]; then
-                echo "${output_prefix}_branch=$default_branch" >> "$GITHUB_OUTPUT"
-            fi
-          }
-
-          eval "$(python - <<'PY'
-          import json
-          d = json.load(open('.github/upstream-version.json'))["repositories"]
-          repos = ["ogg", "opus", "flac", "libopusenc", "opusfile"]
-          for r in repos:
-              url = d[r]["url"]
-              key = r.upper().replace("-", "_") + "_URL"
-              print(f'{key}="{url}"')
-          # Also get opus-tools url (hardcoded or from json if available, but usually it's fixed)
-          print('OPUS_TOOLS_URL="https://github.com/xiph/opus-tools.git"')
-          PY
-          )"
-
-          get_repo_info "ogg" "$OGG_URL" "ogg"
-          get_repo_info "flac" "$FLAC_URL" "flac"
-          get_repo_info "opus" "$OPUS_URL" "opus"
-          get_repo_info "libopusenc" "$LIBOPUSENC_URL" "libopusenc"
-          get_repo_info "opusfile" "$OPUSFILE_URL" "opusfile"
-          get_repo_info "opus-tools" "$OPUS_TOOLS_URL" "opus_tools"
-
-  build-deps-flac:
-    needs: get-versions
+  build-deps-static:
+    needs: check-get-versions
+    if: needs.check-get-versions.outputs.should_run == 'true'
     runs-on: windows-latest
-    strategy:
-      matrix:
-        build_type: [static, shared]
-      fail-fast: false
     steps:
       - uses: actions/checkout@v4
-      
       - uses: msys2/setup-msys2@v2
         with:
           msystem: MINGW64
@@ -123,88 +49,106 @@ jobs:
             mingw-w64-x86_64-autotools
             mingw-w64-x86_64-gcc
 
-      - name: Clone Dependencies
-        shell: bash
-        env:
-          OGG_URL: ${{ needs.get-versions.outputs.ogg_url }}
-          OGG_SHA: ${{ needs.get-versions.outputs.ogg_sha }}
-          FLAC_URL: ${{ needs.get-versions.outputs.flac_url }}
-          FLAC_SHA: ${{ needs.get-versions.outputs.flac_sha }}
-        run: |
-          mkdir -p build_work
-          cd build_work
-          
-          git clone "$OGG_URL" ogg && cd ogg && git checkout "$OGG_SHA" && cd ..
-          git clone "$FLAC_URL" flac && cd flac && git checkout "$FLAC_SHA" && cd ..
-
-      - name: Build Dependencies (FLAC)
+      - name: Build Static Dependencies
         shell: msys2 {0}
         env:
-          VARIANT: ${{ matrix.build_type }}
+          SHA_OGG: ${{ needs.check-get-versions.outputs.sha_ogg }}
+          SHA_OPUS: ${{ needs.check-get-versions.outputs.sha_opus }}
+          SHA_FLAC: ${{ needs.check-get-versions.outputs.sha_flac }}
+          SHA_LIBOPUSENC: ${{ needs.check-get-versions.outputs.sha_libopusenc }}
+          SHA_OPUSFILE: ${{ needs.check-get-versions.outputs.sha_opusfile }}
         run: |
-          ROOT_PREFIX="${GITHUB_WORKSPACE}/install_dir_${VARIANT}"
-          if [ "$VARIANT" == "static" ]; then
-            export CFLAGS="-O2 -static-libgcc -static-libstdc++"
-            export CXXFLAGS="-O2 -static-libgcc -static-libstdc++"
-            CONF_ARGS="--enable-static --disable-shared"
-            CMAKE_ARGS="-DBUILD_SHARED_LIBS=OFF"
-          else
-            export CFLAGS="-O2"
-            export CXXFLAGS="-O2"
-            CONF_ARGS="--disable-static --enable-shared"
-            CMAKE_ARGS="-DBUILD_SHARED_LIBS=ON"
-          fi
+          export CFLAGS="-O2 -static-libgcc -static-libstdc++"
+          export CXXFLAGS="-O2 -static-libgcc -static-libstdc++"
+          export PREFIX="$(pwd)/install_dir_static"
+          mkdir -p $PREFIX
           
-          export PREFIX="$ROOT_PREFIX"
           export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig"
           export CPPFLAGS="-I$PREFIX/include"
           export LDFLAGS="-L$PREFIX/lib"
-          rm -rf "$PREFIX"
-          mkdir -p "$PREFIX"
           
+          mkdir -p build_work
           cd build_work
           
-          # Ogg
-          echo "Building Ogg ($VARIANT)..."
+          clone_repo() {
+             local repo=$1
+             local url=$2
+             local sha=$3
+             echo "Cloning $repo from $url at $sha..."
+             git clone "$url" "$repo"
+             cd "$repo"
+             git checkout "$sha"
+             cd ..
+          }
+          
+          eval "$(python3 - <<'PY'
+          import json
+          d = json.load(open('../.github/upstream-version.json'))["repositories"]
+          for r in ["ogg", "opus", "flac", "libopusenc", "opusfile"]:
+              print(f'{r.upper().replace("-", "_")}_URL="{d[r]["url"]}"')
+          PY
+          )"
+          
+          # 1. Ogg
+          clone_repo ogg "$OGG_URL" "$SHA_OGG"
           cd ogg
           ./autogen.sh
-          ./configure --prefix=$PREFIX $CONF_ARGS
+          ./configure --prefix=$PREFIX --enable-static --disable-shared
           make -j$(nproc)
           make install
           cd ..
           
-          # FLAC
-          echo "Building FLAC ($VARIANT)..."
+          # 2. Opus
+          clone_repo opus "$OPUS_URL" "$SHA_OPUS"
+          cd opus
+          ./autogen.sh
+          ./configure --prefix=$PREFIX --enable-static --disable-shared
+          make -j$(nproc)
+          make install
+          cd ..
+          
+          # 3. Flac (needs Ogg)
+          clone_repo flac "$FLAC_URL" "$SHA_FLAC"
           cd flac
-          cmake -S . -B build -G "MSYS Makefiles" -DCMAKE_INSTALL_PREFIX=$PREFIX $CMAKE_ARGS -DBUILD_PROGRAMS=OFF -DBUILD_TESTING=OFF -DINSTALL_MANPAGES=OFF -DWITH_OGG=ON -DOGG_ROOT=$PREFIX
+          cmake -S . -B build -G "MSYS Makefiles" -DCMAKE_INSTALL_PREFIX=$PREFIX -DBUILD_SHARED_LIBS=OFF -DBUILD_PROGRAMS=OFF -DBUILD_TESTING=OFF -DINSTALL_MANPAGES=OFF -DWITH_OGG=ON -DOGG_ROOT=$PREFIX
           cmake --build build -- -j$(nproc)
           cmake --build build --target install
           cd ..
-
-      - name: Package Dependencies
-        shell: bash
-        env:
-          VARIANT: ${{ matrix.build_type }}
-        run: |
-          cd "$GITHUB_WORKSPACE/install_dir_${VARIANT}" && 7z a "$GITHUB_WORKSPACE/deps-flac-${VARIANT}.zip" *
-
-      - name: Upload Dependencies
+          
+          # 4. Libopusenc (needs Opus)
+          clone_repo libopusenc "$LIBOPUSENC_URL" "$SHA_LIBOPUSENC"
+          cd libopusenc
+          ./autogen.sh
+          ./configure --prefix=$PREFIX --enable-static --disable-shared
+          make -j$(nproc)
+          make install
+          cd ..
+          
+          # 5. Opusfile (needs Opus, Ogg)
+          clone_repo opusfile "$OPUSFILE_URL" "$SHA_OPUSFILE"
+          cd opusfile
+          ./autogen.sh
+          ./configure --prefix=$PREFIX --enable-static --disable-shared --disable-http
+          make -j$(nproc)
+          make install
+          cd ..
+          
+      - name: Package Static Dependencies
+        run: 7z a deps-static.zip ./install_dir_static/*
+        
+      - name: Upload Static Dependencies
         uses: actions/upload-artifact@v4
         with:
-          name: build-deps-flac-${{ matrix.build_type }}
-          path: deps-flac-${{ matrix.build_type }}.zip
+          name: deps-static
+          path: deps-static.zip
           retention-days: 1
 
-  build-deps-opus:
-    needs: get-versions
+  build-deps-shared:
+    needs: check-get-versions
+    if: needs.check-get-versions.outputs.should_run == 'true'
     runs-on: windows-latest
-    strategy:
-      matrix:
-        build_type: [static, shared]
-      fail-fast: false
     steps:
       - uses: actions/checkout@v4
-      
       - uses: msys2/setup-msys2@v2
         with:
           msystem: MINGW64
@@ -217,129 +161,106 @@ jobs:
             mingw-w64-x86_64-autotools
             mingw-w64-x86_64-gcc
 
-      - name: Clone Dependencies
-        shell: bash
-        env:
-          OGG_URL: ${{ needs.get-versions.outputs.ogg_url }}
-          OGG_SHA: ${{ needs.get-versions.outputs.ogg_sha }}
-          OPUS_URL: ${{ needs.get-versions.outputs.opus_url }}
-          OPUS_SHA: ${{ needs.get-versions.outputs.opus_sha }}
-          LIBOPUSENC_URL: ${{ needs.get-versions.outputs.libopusenc_url }}
-          LIBOPUSENC_SHA: ${{ needs.get-versions.outputs.libopusenc_sha }}
-          OPUSFILE_URL: ${{ needs.get-versions.outputs.opusfile_url }}
-          OPUSFILE_SHA: ${{ needs.get-versions.outputs.opusfile_sha }}
-        run: |
-          mkdir -p build_work
-          cd build_work
-          
-          git clone "$OGG_URL" ogg && cd ogg && git checkout "$OGG_SHA" && cd ..
-          git clone "$OPUS_URL" opus && cd opus && git checkout "$OPUS_SHA" && cd ..
-          git clone "$LIBOPUSENC_URL" libopusenc && cd libopusenc && git checkout "$LIBOPUSENC_SHA" && cd ..
-          git clone "$OPUSFILE_URL" opusfile && cd opusfile && git checkout "$OPUSFILE_SHA" && cd ..
-
-      - name: Build Dependencies (Opus & Others)
+      - name: Build Shared Dependencies
         shell: msys2 {0}
         env:
-          VARIANT: ${{ matrix.build_type }}
+          SHA_OGG: ${{ needs.check-get-versions.outputs.sha_ogg }}
+          SHA_OPUS: ${{ needs.check-get-versions.outputs.sha_opus }}
+          SHA_FLAC: ${{ needs.check-get-versions.outputs.sha_flac }}
+          SHA_LIBOPUSENC: ${{ needs.check-get-versions.outputs.sha_libopusenc }}
+          SHA_OPUSFILE: ${{ needs.check-get-versions.outputs.sha_opusfile }}
         run: |
-          ROOT_PREFIX="${GITHUB_WORKSPACE}/install_dir_${VARIANT}"
-          if [ "$VARIANT" == "static" ]; then
-            export CFLAGS="-O2 -static-libgcc -static-libstdc++"
-            export CXXFLAGS="-O2 -static-libgcc -static-libstdc++"
-            CONF_ARGS="--enable-static --disable-shared"
-          else
-            export CFLAGS="-O2"
-            export CXXFLAGS="-O2"
-            CONF_ARGS="--disable-static --enable-shared"
-          fi
+          export CFLAGS="-O2"
+          export CXXFLAGS="-O2"
+          export PREFIX="$(pwd)/install_dir_shared"
+          mkdir -p $PREFIX
           
-          export PREFIX="$ROOT_PREFIX"
           export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig"
           export CPPFLAGS="-I$PREFIX/include"
           export LDFLAGS="-L$PREFIX/lib"
-          rm -rf "$PREFIX"
-          mkdir -p "$PREFIX"
           
+          mkdir -p build_work
           cd build_work
           
-          # Ogg
-          echo "Building Ogg ($VARIANT)..."
+          clone_repo() {
+             local repo=$1
+             local url=$2
+             local sha=$3
+             echo "Cloning $repo from $url at $sha..."
+             git clone "$url" "$repo"
+             cd "$repo"
+             git checkout "$sha"
+             cd ..
+          }
+          
+          eval "$(python3 - <<'PY'
+          import json
+          d = json.load(open('../.github/upstream-version.json'))["repositories"]
+          for r in ["ogg", "opus", "flac", "libopusenc", "opusfile"]:
+              print(f'{r.upper().replace("-", "_")}_URL="{d[r]["url"]}"')
+          PY
+          )"
+          
+          # 1. Ogg
+          clone_repo ogg "$OGG_URL" "$SHA_OGG"
           cd ogg
           ./autogen.sh
-          ./configure --prefix=$PREFIX $CONF_ARGS
+          ./configure --prefix=$PREFIX --enable-shared --disable-static
           make -j$(nproc)
           make install
           cd ..
           
-          # Opus
-          echo "Building Opus ($VARIANT)..."
+          # 2. Opus
+          clone_repo opus "$OPUS_URL" "$SHA_OPUS"
           cd opus
           ./autogen.sh
-          ./configure --prefix=$PREFIX $CONF_ARGS
+          ./configure --prefix=$PREFIX --enable-shared --disable-static
           make -j$(nproc)
           make install
           cd ..
           
-          # Libopusenc
-          echo "Building Libopusenc ($VARIANT)..."
+          # 3. Flac
+          clone_repo flac "$FLAC_URL" "$SHA_FLAC"
+          cd flac
+          cmake -S . -B build -G "MSYS Makefiles" -DCMAKE_INSTALL_PREFIX=$PREFIX -DBUILD_SHARED_LIBS=ON -DBUILD_PROGRAMS=OFF -DBUILD_TESTING=OFF -DINSTALL_MANPAGES=OFF -DWITH_OGG=ON -DOGG_ROOT=$PREFIX
+          cmake --build build -- -j$(nproc)
+          cmake --build build --target install
+          cd ..
+          
+          # 4. Libopusenc
+          clone_repo libopusenc "$LIBOPUSENC_URL" "$SHA_LIBOPUSENC"
           cd libopusenc
           ./autogen.sh
-          ./configure --prefix=$PREFIX $CONF_ARGS
+          ./configure --prefix=$PREFIX --enable-shared --disable-static
           make -j$(nproc)
           make install
           cd ..
           
-          # Opusfile
-          echo "Building Opusfile ($VARIANT)..."
+          # 5. Opusfile
+          clone_repo opusfile "$OPUSFILE_URL" "$SHA_OPUSFILE"
           cd opusfile
           ./autogen.sh
-          ./configure --prefix=$PREFIX $CONF_ARGS --disable-http
+          ./configure --prefix=$PREFIX --enable-shared --disable-static --disable-http
           make -j$(nproc)
           make install
           cd ..
-
-      - name: Package Dependencies
-        shell: bash
-        env:
-          VARIANT: ${{ matrix.build_type }}
-        run: |
-          cd "$GITHUB_WORKSPACE/install_dir_${VARIANT}" && 7z a "$GITHUB_WORKSPACE/deps-opus-${VARIANT}.zip" *
-
-      - name: Upload Dependencies
+          
+      - name: Package Shared Dependencies
+        run: 7z a deps-shared.zip ./install_dir_shared/*
+        
+      - name: Upload Shared Dependencies
         uses: actions/upload-artifact@v4
         with:
-          name: build-deps-opus-${{ matrix.build_type }}
-          path: deps-opus-${{ matrix.build_type }}.zip
+          name: deps-shared
+          path: deps-shared.zip
           retention-days: 1
 
-  build-tools:
-    needs: [check, get-versions, build-deps-flac, build-deps-opus]
-    if: needs.check.outputs.should_run == 'true'
+  build-tools-static:
+    needs: [check-get-versions, build-deps-static]
+    if: needs.check-get-versions.outputs.should_run == 'true'
     runs-on: windows-latest
-    strategy:
-      matrix:
-        build_type: [static, shared]
-      fail-fast: false
-    outputs:
-      zip_name_static: ${{ steps.pkg.outputs.zip_name_static }}
-      tag_name: ${{ steps.pkg.outputs.tag_name }}
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: ${{ env.DEFAULT_BRANCH }}
-          
-      - name: Clone upstream source
-        shell: powershell
-        env:
-          UPSTREAM_BRANCH: ${{ needs.get-versions.outputs.opus_tools_branch }}
-          UPSTREAM_URL: ${{ needs.get-versions.outputs.opus_tools_url }}
-        run: |
-          if (Test-Path "src") { Remove-Item -Recurse -Force src }
-          git clone --branch $env:UPSTREAM_BRANCH $env:UPSTREAM_URL src
-          cd src
-          $sha = "${{ needs.get-versions.outputs.opus_tools_sha }}"
-          if ($sha) { git checkout $sha }
-
       - uses: msys2/setup-msys2@v2
         with:
           msystem: MINGW64
@@ -349,64 +270,46 @@ jobs:
             git
             mingw-w64-x86_64-toolchain
             mingw-w64-x86_64-autotools
-            groff
-            util-linux
-
-      - name: Download Dependencies (FLAC)
+            
+      - name: Download Static Dependencies
         uses: actions/download-artifact@v4
         with:
-          name: build-deps-flac-${{ matrix.build_type }}
+          name: deps-static
           path: .
-
-      - name: Download Dependencies (Opus)
-        uses: actions/download-artifact@v4
-        with:
-          name: build-deps-opus-${{ matrix.build_type }}
-          path: .
-
+          
       - name: Extract Dependencies
-        run: |
-          7z x deps-flac-${{ matrix.build_type }}.zip -o"./install_dir_${{ matrix.build_type }}" -y
-          7z x deps-opus-${{ matrix.build_type }}.zip -o"./install_dir_${{ matrix.build_type }}" -y
-
-      - name: Build Opus-Tools
+        run: 7z x deps-static.zip -o"./install_dir_static" -y
+        
+      - name: Build Opus-Tools Static
         shell: msys2 {0}
         env:
-          BUILD_TYPE: ${{ matrix.build_type }}
+          SHA_OPUS_TOOLS: ${{ needs.check-get-versions.outputs.sha_opus_tools }}
         run: |
-          export PREFIX="$(pwd)/install_dir_${BUILD_TYPE}"
+          export PREFIX="$(pwd)/install_dir_static"
           export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig"
+          export PKG_CONFIG="pkg-config --static"
+          export CFLAGS="-O2 -static-libgcc -static-libstdc++ -I$PREFIX/include -DFLAC__NO_DLL -Dfopen_utf8=opus_fopen_utf8 -Dunlink_utf8=opus_unlink_utf8"
+          export LDFLAGS="-L$PREFIX/lib -static"
           
-          if [ "$BUILD_TYPE" == "static" ]; then
-            export PKG_CONFIG="pkg-config --static"
-            export CFLAGS="-O2 -static-libgcc -static-libstdc++ -I$PREFIX/include -DFLAC__NO_DLL -Dfopen_utf8=opus_fopen_utf8 -Dunlink_utf8=opus_unlink_utf8"
-            export LDFLAGS="-L$PREFIX/lib -static"
-            CONF_ARGS="--enable-static --disable-shared"
-          else
-            export PKG_CONFIG="pkg-config"
-            export CFLAGS="-O2 -I$PREFIX/include -Dfopen_utf8=opus_fopen_utf8 -Dunlink_utf8=opus_unlink_utf8"
-            export LDFLAGS="-L$PREFIX/lib"
-            CONF_ARGS="--disable-static --enable-shared"
-          fi
+          eval "$(python3 - <<'PY'
+          import json
+          d = json.load(open('.github/upstream-version.json'))["repositories"]
+          print(f'OPUS_TOOLS_URL="{d["opus-tools"]["url"]}"')
+          PY
+          )"
           
+          git clone "$OPUS_TOOLS_URL" src
           cd src
+          git checkout "$SHA_OPUS_TOOLS"
           ./autogen.sh
-          git reset --hard
-          ./configure --prefix=$PREFIX $CONF_ARGS --with-flac
-          
+          ./configure --prefix=$PREFIX --enable-static --disable-shared --with-flac
           make -j$(nproc)
           
-          ls -l *.exe
+          mkdir ../release_static
+          cp opusenc.exe ../release_static/
+          cp opusdec.exe ../release_static/
+          cp opusinfo.exe ../release_static/
           
-          mkdir ../release
-          cp opusenc.exe ../release/
-          cp opusdec.exe ../release/
-          cp opusinfo.exe ../release/
-          
-          if [ "$BUILD_TYPE" == "shared" ]; then
-             cp $PREFIX/bin/*.dll ../release/
-          fi
-
       - name: Install Documentation Tools
         shell: powershell
         run: |
@@ -417,7 +320,7 @@ jobs:
       - name: Generate Documentation
         shell: powershell
         run: |
-          $outDir = Join-Path $pwd "release"
+          $outDir = Join-Path $pwd "release_static"
           Get-ChildItem -Path "src\man\*.1" | ForEach-Object {
             $base = $_.BaseName
             $source = $_.FullName
@@ -428,63 +331,98 @@ jobs:
             pandoc $source -f man -t markdown -s -o (Join-Path $outDir "$base.md")
           }
 
-      - name: Get Versions & Create Package
-        id: pkg
-        shell: bash
-        env:
-          SHA_OPUS: ${{ needs.get-versions.outputs.short_opus_sha }}
-        run: |
-          cd src
-          OPUS_TOOLS_SHA=$(git rev-parse HEAD)
-          OPUS_TOOLS_SHORT=${OPUS_TOOLS_SHA:0:7}
-          cd ..
-          
-          DATE=$(date +'%Y-%m-%d_%H-%M')
-          ZIP_NAME="opus-tools-${OPUS_TOOLS_SHORT}_opus-${SHA_OPUS}-${{ matrix.build_type }}.zip"
-          echo "ZIP_NAME=$ZIP_NAME" >> $GITHUB_ENV
-          echo "TAG_NAME=${DATE}_${OPUS_TOOLS_SHORT}" >> $GITHUB_ENV
-          
-          # Output for release job
-          if [ "${{ matrix.build_type }}" == "static" ]; then
-             echo "zip_name_static=$ZIP_NAME" >> "$GITHUB_OUTPUT"
-             echo "tag_name=${DATE}_${OPUS_TOOLS_SHORT}" >> "$GITHUB_OUTPUT"
-          fi
-          
-          cd release
-          7z a "../$ZIP_NAME" *
-
-      - name: Release (Artifact)
-        uses: softprops/action-gh-release@v1
+      - name: Upload Opus-Tools Static
+        uses: actions/upload-artifact@v4
         with:
-          files: ${{ env.ZIP_NAME }}
-          tag_name: ${{ env.TAG_NAME }}
-          body_path: release_notes.md
-
-  update-versions:
-    needs: [check, get-versions, build-tools]
-    if: needs.check.outputs.should_run == 'true'
-    runs-on: ubuntu-latest
+          name: opus-tools-static
+          path: release_static
+          
+  build-tools-shared:
+    needs: [check-get-versions, build-deps-shared]
+    if: needs.check-get-versions.outputs.should_run == 'true'
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: msys2/setup-msys2@v2
         with:
-          ref: ${{ env.DEFAULT_BRANCH }}
+          msystem: MINGW64
+          update: true
+          install: >-
+            base-devel
+            git
+            mingw-w64-x86_64-toolchain
+            mingw-w64-x86_64-autotools
+            
+      - name: Download Shared Dependencies
+        uses: actions/download-artifact@v4
+        with:
+          name: deps-shared
+          path: .
+          
+      - name: Extract Dependencies
+        run: 7z x deps-shared.zip -o"./install_dir_shared" -y
+        
+      - name: Build Opus-Tools Shared
+        shell: msys2 {0}
+        env:
+          SHA_OPUS_TOOLS: ${{ needs.check-get-versions.outputs.sha_opus_tools }}
+        run: |
+          export PREFIX="$(pwd)/install_dir_shared"
+          export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig"
+          export CFLAGS="-O2 -I$PREFIX/include -Dfopen_utf8=opus_fopen_utf8 -Dunlink_utf8=opus_unlink_utf8"
+          export LDFLAGS="-L$PREFIX/lib"
+          
+          eval "$(python3 - <<'PY'
+          import json
+          d = json.load(open('.github/upstream-version.json'))["repositories"]
+          print(f'OPUS_TOOLS_URL="{d["opus-tools"]["url"]}"')
+          PY
+          )"
+          
+          git clone "$OPUS_TOOLS_URL" src
+          cd src
+          git checkout "$SHA_OPUS_TOOLS"
+          ./autogen.sh
+          ./configure --prefix=$PREFIX --with-flac
+          make -j$(nproc)
+          
+          mkdir ../release_shared
+          cp opusenc.exe ../release_shared/
+          cp opusdec.exe ../release_shared/
+          cp opusinfo.exe ../release_shared/
+          
+          # Bundle DLLs
+          cp $PREFIX/bin/*.dll ../release_shared/
+          
+      - name: Upload Opus-Tools Shared
+        uses: actions/upload-artifact@v4
+        with:
+          name: opus-tools-shared
+          path: release_shared
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+  update-versions:
+    needs: [check-get-versions, build-tools-static, build-tools-shared]
+    if: needs.check-get-versions.outputs.should_run == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      SHA_OPUS: ${{ needs.check-get-versions.outputs.sha_opus }}
+      SHA_OPUSFILE: ${{ needs.check-get-versions.outputs.sha_opusfile }}
+      SHA_LIBOPUSENC: ${{ needs.check-get-versions.outputs.sha_libopusenc }}
+      SHA_OGG: ${{ needs.check-get-versions.outputs.sha_ogg }}
+      SHA_FLAC: ${{ needs.check-get-versions.outputs.sha_flac }}
+      SHA_OPUS_TOOLS: ${{ needs.check-get-versions.outputs.sha_opus_tools }}
+    steps:
+      - uses: actions/checkout@v4
+      
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.x'
-          
-      - name: Update upstream-version.json & Generate Notes
-        env:
-          SHA_OPUS: ${{ needs.get-versions.outputs.opus_sha }}
-          SHA_FLAC: ${{ needs.get-versions.outputs.flac_sha }}
-          SHA_OGG: ${{ needs.get-versions.outputs.ogg_sha }}
-          SHA_LIBOPUSENC: ${{ needs.get-versions.outputs.libopusenc_sha }}
-          SHA_OPUSFILE: ${{ needs.get-versions.outputs.opusfile_sha }}
-          SHA_OPUS_TOOLS: ${{ needs.get-versions.outputs.opus_tools_sha }}
-        run: |
-          python .github/scripts/update_versions.py
 
+      - name: Update upstream-version.json & Generate Notes
+        run: python .github/scripts/update_versions.py
+        
       - name: Commit and Push upstream-version.json
         run: |
           git config --global user.name "github-actions[bot]"
@@ -493,3 +431,43 @@ jobs:
           git commit -m "Update upstream-version.json [skip ci]" || echo "No changes to commit"
           git remote set-url origin "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git"
           git push origin ${{ env.DEFAULT_BRANCH }}
+
+      - name: Download Static Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: opus-tools-static
+          path: opus-tools-static
+
+      - name: Download Shared Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: opus-tools-shared
+          path: opus-tools-shared
+
+      - name: Package Release
+        run: |
+          SHA_SHORT=${SHA_OPUS_TOOLS:0:7}
+          DATE=$(date +'%Y-%m-%d_%H-%M')
+          
+          # Zip Static
+          cd opus-tools-static
+          zip -r ../opus-tools-static-${SHA_SHORT}.zip *
+          cd ..
+          
+          # Zip Shared
+          cd opus-tools-shared
+          zip -r ../opus-tools-shared-${SHA_SHORT}.zip *
+          cd ..
+          
+          echo "TAG_NAME=${DATE}_${SHA_SHORT}" >> $GITHUB_ENV
+          echo "STATIC_ZIP=opus-tools-static-${SHA_SHORT}.zip" >> $GITHUB_ENV
+          echo "SHARED_ZIP=opus-tools-shared-${SHA_SHORT}.zip" >> $GITHUB_ENV
+
+      - name: Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            ${{ env.STATIC_ZIP }}
+            ${{ env.SHARED_ZIP }}
+          tag_name: ${{ env.TAG_NAME }}
+          body_path: release_notes.md
