@@ -247,8 +247,7 @@ jobs:
       - name: Install Documentation Tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y doxygen pandoc npm autoconf automake libtool
-          sudo npm install -g moxygen
+          sudo apt-get install -y doxygen pandoc autoconf automake libtool
 
       - name: Clone Opus & Generate Docs
         env:
@@ -262,14 +261,20 @@ jobs:
           ./autogen.sh
           ./configure --enable-doc
           
-          # Configure Doxyfile for XML generation (required for moxygen)
+          # Configure Doxyfile for DocBook generation (Standard interchange format)
           if [ -f doc/Doxyfile ]; then
-              echo "Modifying Doxyfile for XML generation..."
+              echo "Modifying Doxyfile for DocBook generation..."
               cat >> doc/Doxyfile <<EOF
           
-          # Added for Moxygen support
-          GENERATE_XML = YES
-          XML_OUTPUT = xml
+          # Fix paths for running from doc/ directory
+          OUTPUT_DIRECTORY = .
+          STRIP_FROM_PATH = ..
+          INPUT = ../include/opus.h ../include/opus_types.h ../include/opus_defines.h ../include/opus_multistream.h ../include/opus_custom.h
+          
+          # Use DocBook as intermediate format for Pandoc
+          GENERATE_DOCBOOK = YES
+          DOCBOOK_OUTPUT = docbook
+          GENERATE_XML = NO
           
           # Ensure full API coverage
           EXTRACT_ALL = YES
@@ -301,21 +306,23 @@ jobs:
           cd opus/doc
           zip -r ../../opus-docs/opus-api-html.zip html
           
-          # 2. Generate Complete Markdown Documentation
-          # Using moxygen to convert Doxygen XML output to a single Markdown file
-          if [ -d "xml" ]; then
-             moxygen --output ../../opus-docs/opus-api.md xml
+          # 2. Convert DocBook to Complete Markdown & Text
+          # DocBook (refman.xml) is the standard complete representation
+          if [ -d "docbook" ] && [ -f "docbook/refman.xml" ]; then
+             # Convert to Markdown (Github Flavored)
+             pandoc -f docbook -t gfm docbook/refman.xml -o ../../opus-docs/opus-api.md
+             
+             # Convert to Plain Text
+             pandoc -f docbook -t plain docbook/refman.xml -o ../../opus-docs/opus-api.txt
           else
-             echo "Error: XML documentation not generated"
+             echo "Error: DocBook documentation not generated"
+             ls -R
              exit 1
           fi
           
           cd ../..
           
-          # 3. Convert Complete Markdown to Text
-          pandoc -f markdown -t plain opus-docs/opus-api.md -o opus-docs/opus-api.txt
-          
-          # 4. Create a README
+          # 3. Create a README
           echo "Opus API Documentation" > opus-docs/README.txt
           echo "This package contains:" >> opus-docs/README.txt
           echo "- opus-api-html.zip: Full HTML API documentation (extract to view)" >> opus-docs/README.txt
