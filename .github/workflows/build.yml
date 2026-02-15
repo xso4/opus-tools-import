@@ -260,7 +260,11 @@ jobs:
           # Generate Doxyfile from Doxyfile.in
           # Usually ./configure or cmake generates this, but we can do a simple sed
           if [ -f doc/Doxyfile.in ]; then
-             sed -e 's/@VERSION@/unknown/' \
+             OPUS_VERSION=$(grep -E "AC_INIT\\(\\[opus\\],\\[[0-9.]+\\]" configure.ac | sed -E 's/.*\\[opus\\],\\[(.*)\\]\\).*/\\1/' | head -n 1)
+             if [ -z "$OPUS_VERSION" ]; then
+                OPUS_VERSION=$OPUS_SHA
+             fi
+             sed -e "s/@VERSION@/$OPUS_VERSION/" \
                  -e 's/@HAVE_DOT@/NO/' \
                  -e 's/@DOT_PATH@//' \
                  doc/Doxyfile.in > doc/Doxyfile
