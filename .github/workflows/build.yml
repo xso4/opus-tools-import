@@ -54,15 +54,25 @@ jobs:
           ./autogen.sh
           ./configure --enable-doc
           
-          # Enable XML generation for Moxygen (append to generated Doxyfile)
+          # Enable XML generation for Moxygen and force output to current dir
           echo "GENERATE_XML = YES" >> doc/Doxyfile
+          echo "OUTPUT_DIRECTORY = ." >> doc/Doxyfile
           
           # Build docs
           cd doc
           doxygen Doxyfile
           
-          # Generate Markdown
-          moxygen xml --no-index --anchors --output opus_api.md
+          # Debug: Check XML directory content
+          echo "Checking xml directory..."
+          ls -F xml || echo "xml dir not found"
+          
+          # Generate Markdown (use absolute path for safety)
+          moxygen "$(pwd)/xml" --no-index --anchors --output opus_api.md
+          
+          # Check if MD is empty
+          if [ ! -s opus_api.md ]; then
+            echo "Warning: opus_api.md is empty!"
+          fi
           
           # Generate Text
           pandoc opus_api.md -f markdown -t plain -o opus_api.txt
