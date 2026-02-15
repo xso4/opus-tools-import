@@ -237,8 +237,72 @@ jobs:
           path: opus-tools-${{ matrix.type }}.zip
           retention-days: 1
 
+  build-docs:
+    needs: check-get-versions
+    if: needs.check-get-versions.outputs.should_run == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install Documentation Tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y doxygen pandoc
+
+      - name: Clone Opus & Generate Docs
+        env:
+          OPUS_SHA: ${{ needs.check-get-versions.outputs.opus_sha }}
+        run: |
+          git clone https://github.com/xiph/opus.git
+          cd opus
+          git checkout $OPUS_SHA
+          
+          # Generate Doxyfile from Doxyfile.in
+          # Usually ./configure or cmake generates this, but we can do a simple sed
+          if [ -f doc/Doxyfile.in ]; then
+             sed -e 's/@VERSION@/unknown/' \
+                 -e 's/@HAVE_DOT@/NO/' \
+                 -e 's/@DOT_PATH@//' \
+                 doc/Doxyfile.in > doc/Doxyfile
+          fi
+          
+          cd doc
+          doxygen
+          
+          if [ ! -d "html" ]; then
+             echo "Error: HTML documentation not generated"
+             exit 1
+          fi
+
+      - name: Convert & Package Docs
+        run: |
+          mkdir -p opus-docs
+          
+          # 1. Zip HTML Documentation
+          cd opus/doc
+          zip -r ../../opus-docs/opus-api-html.zip html
+          cd ../..
+          
+          # 2. Convert Main Page to Markdown & Text
+          # Using pandoc to convert the main index page as a summary
+          pandoc -f html -t markdown opus/doc/html/index.html -o opus-docs/api-index.md
+          pandoc -f html -t plain opus/doc/html/index.html -o opus-docs/api-index.txt
+          
+          # 3. Create a README
+          echo "Opus API Documentation" > opus-docs/README.txt
+          echo "This package contains:" >> opus-docs/README.txt
+          echo "- opus-api-html.zip: Full HTML API documentation (extract to view)" >> opus-docs/README.txt
+          echo "- api-index.md/txt: Converted main page content" >> opus-docs/README.txt
+
+      - name: Upload Docs
+        uses: actions/upload-artifact@v4
+        with:
+          name: opus-docs
+          path: opus-docs/*
+          retention-days: 1
+
   update-versions:
-    needs: [check-get-versions, build-opus-tools]
+    needs: [check-get-versions, build-opus-tools, build-docs]
     if: needs.check-get-versions.outputs.should_run == 'true'
     runs-on: ubuntu-latest
     permissions:
@@ -254,6 +318,12 @@ jobs:
         with:
           pattern: opus-tools-*
           merge-multiple: true
+          path: release_assets
+
+      - name: Download Docs
+        uses: actions/download-artifact@v4
+        with:
+          name: opus-docs
           path: release_assets
 
       - name: Update upstream-version.json & Generate Notes
