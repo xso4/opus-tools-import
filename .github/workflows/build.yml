@@ -49,7 +49,6 @@ jobs:
             mingw-w64-x86_64-cmake
             mingw-w64-x86_64-autotools
             mingw-w64-x86_64-gcc
-
       - name: Read Versions & Export Variables
         id: ver
         shell: bash
@@ -77,7 +76,6 @@ jobs:
              echo "$repo=$FULL_SHA" >> "$GITHUB_OUTPUT"
              cd ..
           done
-
       - name: Build Dependencies (FLAC)
         shell: msys2 {0}
         run: |
@@ -89,7 +87,6 @@ jobs:
           export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig"
           export CPPFLAGS="-I$PREFIX/include"
           export LDFLAGS="-L$PREFIX/lib"
-
           cd build_work
           
           echo "Building Ogg..."
@@ -107,11 +104,9 @@ jobs:
           cmake --build build -- -j$(nproc)
           cmake --build build --target install
           cd ..
-
       - name: Package Dependencies
         run: |
           7z a deps-flac.zip ./install_dir/*
-
       - name: Upload Dependencies
         uses: actions/upload-artifact@v4
         with:
@@ -142,7 +137,6 @@ jobs:
             mingw-w64-x86_64-cmake
             mingw-w64-x86_64-autotools
             mingw-w64-x86_64-gcc
-
       - name: Read Versions & Export Variables
         id: ver
         shell: bash
@@ -174,7 +168,6 @@ jobs:
              fi
              cd ..
           done
-
       - name: Build Dependencies (Opus & Others)
         shell: msys2 {0}
         run: |
@@ -186,7 +179,6 @@ jobs:
           export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig"
           export CPPFLAGS="-I$PREFIX/include"
           export LDFLAGS="-L$PREFIX/lib"
-
           cd build_work
           
           echo "Building Ogg..."
@@ -224,11 +216,9 @@ jobs:
           make -j$(nproc)
           make install
           cd ..
-
       - name: Package Dependencies
         run: |
           7z a deps-opus.zip ./install_dir/*
-
       - name: Upload Dependencies
         uses: actions/upload-artifact@v4
         with:
@@ -256,7 +246,6 @@ jobs:
           # 删除本地自带的 src 目录，确保克隆到干净的 src
           if (Test-Path "src") { Remove-Item -Recurse -Force src }
           git clone --branch $upstreamBranch https://github.com/xiph/opus-tools.git src
-
       - uses: msys2/setup-msys2@v2
         with:
           msystem: MINGW64
@@ -266,7 +255,6 @@ jobs:
             git
             mingw-w64-x86_64-toolchain
             mingw-w64-x86_64-autotools
-
       - name: Download Dependencies (FLAC)
         uses: actions/download-artifact@v4
         with:
@@ -283,7 +271,6 @@ jobs:
         run: |
           7z x deps-flac.zip -o"./install_dir" -y
           7z x deps-opus.zip -o"./install_dir" -y
-
       - name: Build Opus-Tools
         shell: msys2 {0}
         run: |
@@ -306,14 +293,12 @@ jobs:
           cp opusenc.exe ../release/
           cp opusdec.exe ../release/
           cp opusinfo.exe ../release/
-
       - name: Install Documentation Tools
         shell: powershell
         run: |
           choco install pandoc --no-progress
           choco install wkhtmltopdf --no-progress
           $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
-
       - name: Generate Documentation
         shell: powershell
         run: |
@@ -327,7 +312,6 @@ jobs:
             pandoc $source -f man -o (Join-Path $outDir "$base.pdf") --pdf-engine=wkhtmltopdf
             pandoc $source -f man -t markdown -s -o (Join-Path $outDir "$base.md")
           }
-
       - name: Get Versions & Create Package
         id: pkg
         shell: bash
@@ -348,7 +332,6 @@ jobs:
           
           cd release
           7z a "../$ZIP_NAME" *
-
       - name: Update upstream-version.json & Generate Notes
         env:
           SHA_OPUS: ${{ needs.build-deps-opus.outputs.sha_opus }}
@@ -359,7 +342,6 @@ jobs:
           SHA_OPUS_TOOLS: ${{ env.SHA_OPUS_TOOLS }}
         run: |
           python .github/scripts/update_versions.py
-
       - name: Commit and Push upstream-version.json
         run: |
           git config --global user.name "github-actions[bot]"
@@ -368,7 +350,6 @@ jobs:
           git commit -m "Update upstream-version.json [skip ci]" || echo "No changes to commit"
           git remote set-url origin "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git"
           git push origin ${{ env.DEFAULT_BRANCH }}
-
       - name: Release
         uses: softprops/action-gh-release@v1
         with:
