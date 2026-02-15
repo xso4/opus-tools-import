@@ -41,7 +41,6 @@ jobs:
         type: [static, shared]
         group: [flac-deps, opus-deps]
     steps:
-      - uses: actions/checkout@v4
       - uses: msys2/setup-msys2@v2
         with:
           msystem: MINGW64
@@ -159,7 +158,6 @@ jobs:
       matrix:
         type: [static, shared]
     steps:
-      - uses: actions/checkout@v4
       - uses: msys2/setup-msys2@v2
         with:
           msystem: MINGW64
@@ -209,6 +207,7 @@ jobs:
           fi
 
           echo "Cloning Opus Tools ($OPUS_TOOLS_SHA)..."
+          rm -rf src
           git clone https://github.com/xiph/opus-tools.git src
           cd src
           git checkout $OPUS_TOOLS_SHA
