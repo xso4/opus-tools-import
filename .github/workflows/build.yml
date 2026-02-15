@@ -248,6 +248,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y doxygen pandoc
+          sudo npm install -g moxygen
 
       - name: Clone Opus & Generate Docs
         env:
@@ -300,6 +301,10 @@ jobs:
               content = content.replace('@HAVE_DOT@', 'NO')
               content = content.replace('@DOT_PATH@', '')
               
+              # Enable XML generation for Moxygen
+              content += '\nGENERATE_XML = YES\n'
+              content += 'XML_OUTPUT = xml\n' 
+              
               with open('doc/Doxyfile', 'w') as f:
                   f.write(content)
           else:
@@ -322,18 +327,28 @@ jobs:
           # 1. Zip HTML Documentation
           cd opus/doc
           zip -r ../../opus-docs/opus-api-html.zip html
+          
+          # 2. Generate Complete Markdown Documentation
+          # Using moxygen to convert Doxygen XML output to a single Markdown file
+          if [ -d "xml" ]; then
+             moxygen --output ../../opus-docs/opus-api.md xml
+          else
+             echo "Error: XML documentation not generated"
+             exit 1
+          fi
+          
           cd ../..
           
-          # 2. Convert Main Page to Markdown & Text
-          # Using pandoc to convert the main index page as a summary
-          pandoc -f html -t markdown opus/doc/html/index.html -o opus-docs/api-index.md
-          pandoc -f html -t plain opus/doc/html/index.html -o opus-docs/api-index.txt
+          # 3. Convert Complete Markdown to Text
+          pandoc -f markdown -t plain opus-docs/opus-api.md -o opus-docs/opus-api.txt
           
-          # 3. Create a README
+          # 4. Create a README
           echo "Opus API Documentation" > opus-docs/README.txt
           echo "This package contains:" >> opus-docs/README.txt
           echo "- opus-api-html.zip: Full HTML API documentation (extract to view)" >> opus-docs/README.txt
-          echo "- api-index.md/txt: Converted main page content" >> opus-docs/README.txt
+          echo "- opus-api.md: Complete API reference in Markdown format" >> opus-docs/README.txt
+          echo "- opus-api.txt: Complete API reference in Plain Text format" >> opus-docs/README.txt
+
 
       - name: Upload Docs
         uses: actions/upload-artifact@v4
