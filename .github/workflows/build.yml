@@ -31,6 +31,51 @@ jobs:
         id: check
         run: python .github/scripts/check_updates.py
 
+  generate-docs:
+    needs: check-get-versions
+    if: needs.check-get-versions.outputs.should_run == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Opus
+        run: |
+          git clone https://github.com/xiph/opus.git
+          cd opus
+          git checkout ${{ needs.check-get-versions.outputs.opus_sha }}
+
+      - name: Install Documentation Tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y doxygen graphviz pandoc npm autoconf automake libtool
+          sudo npm install -g moxygen
+
+      - name: Configure and Generate Docs
+        run: |
+          cd opus
+          ./autogen.sh
+          ./configure --enable-doc
+          
+          # Enable XML generation for Moxygen (append to generated Doxyfile)
+          echo "GENERATE_XML = YES" >> doc/Doxyfile
+          
+          # Build docs
+          cd doc
+          doxygen Doxyfile
+          
+          # Generate Markdown
+          moxygen xml --no-index --anchors --output opus_api.md
+          
+          # Generate Text
+          pandoc opus_api.md -f markdown -t plain -o opus_api.txt
+
+      - name: Upload Documentation
+        uses: actions/upload-artifact@v4
+        with:
+          name: opus-api-docs
+          path: |
+            opus/doc/html
+            opus/doc/opus_api.md
+            opus/doc/opus_api.txt
+
   build-dependencies:
     needs: check-get-versions
     if: needs.check-get-versions.outputs.should_run == 'true'
