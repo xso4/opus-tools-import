@@ -257,18 +257,55 @@ jobs:
           cd opus
           git checkout $OPUS_SHA
           
-          # Generate Doxyfile from Doxyfile.in
-          # Usually ./configure or cmake generates this, but we can do a simple sed
-          if [ -f doc/Doxyfile.in ]; then
-             OPUS_VERSION=$(grep -E "AC_INIT\\(\\[opus\\],\\[[0-9.]+\\]" configure.ac | sed -E 's/.*\\[opus\\],\\[(.*)\\]\\).*/\\1/' | head -n 1)
-             if [ -z "$OPUS_VERSION" ]; then
-                OPUS_VERSION=$OPUS_SHA
-             fi
-             sed -e "s/@VERSION@/$OPUS_VERSION/" \
-                 -e 's/@HAVE_DOT@/NO/' \
-                 -e 's/@DOT_PATH@//' \
-                 doc/Doxyfile.in > doc/Doxyfile
-          fi
+          # Generate Doxyfile using Python for better reliability
+          python3 -c "
+          import os
+          import subprocess
+          import sys
+
+          def get_version():
+              # Try running update_version script
+              if os.path.exists('./update_version'):
+                  try:
+                      # update_version writes to package_version file or stdout
+                      # It seems it updates package_version file.
+                      # Let's try executing it.
+                      subprocess.run(['sh', './update_version'], check=False)
+                  except Exception:
+                      pass
+              
+              # Read package_version if exists
+              if os.path.exists('package_version'):
+                  try:
+                      with open('package_version', 'r') as f:
+                          for line in f:
+                              if 'PACKAGE_VERSION=' in line:
+                                  return line.split('=')[1].strip().strip('\"')
+                  except Exception:
+                      pass
+              
+              # Fallback to git sha
+              return os.environ.get('OPUS_SHA', 'unknown')
+
+          version = get_version()
+          print(f'Detected Opus version: {version}')
+
+          if os.path.exists('doc/Doxyfile.in'):
+              with open('doc/Doxyfile.in', 'r') as f:
+                  content = f.read()
+              
+              content = content.replace('@VERSION@', version)
+              content = content.replace('@top_srcdir@', '..')
+              content = content.replace('@top_builddir@', '..')
+              content = content.replace('@HAVE_DOT@', 'NO')
+              content = content.replace('@DOT_PATH@', '')
+              
+              with open('doc/Doxyfile', 'w') as f:
+                  f.write(content)
+          else:
+              print('Error: doc/Doxyfile.in not found')
+              sys.exit(1)
+          "
           
           cd doc
           doxygen
