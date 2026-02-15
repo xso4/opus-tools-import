@@ -1,4 +1,4 @@
-name: Build Windows Static Binary
+name: Build Windows Static/Shared Binary
 
 on:
   schedule:
@@ -81,42 +81,69 @@ jobs:
       - name: Build Dependencies (FLAC)
         shell: msys2 {0}
         run: |
-          export CFLAGS="-O2 -static-libgcc -static-libstdc++"
-          export CXXFLAGS="-O2 -static-libgcc -static-libstdc++"
-          export PREFIX="$(pwd)/install_dir"
-          mkdir -p $PREFIX
+          build_variant() {
+            VARIANT=$1
+            if [ "$VARIANT" == "static" ]; then
+              export PREFIX="$(pwd)/install_dir_static"
+              export CFLAGS="-O2 -static-libgcc -static-libstdc++"
+              export CXXFLAGS="-O2 -static-libgcc -static-libstdc++"
+              CONF_ARGS="--enable-static --disable-shared"
+              CMAKE_ARGS="-DBUILD_SHARED_LIBS=OFF"
+            else
+              export PREFIX="$(pwd)/install_dir_shared"
+              export CFLAGS="-O2"
+              export CXXFLAGS="-O2"
+              CONF_ARGS="--disable-static --enable-shared"
+              CMAKE_ARGS="-DBUILD_SHARED_LIBS=ON"
+            fi
+            
+            export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig"
+            export CPPFLAGS="-I$PREFIX/include"
+            export LDFLAGS="-L$PREFIX/lib"
+            mkdir -p $PREFIX
+            
+            # Ogg
+            echo "Building Ogg ($VARIANT)..."
+            cd ogg
+            git clean -fdx
+            ./autogen.sh
+            ./configure --prefix=$PREFIX $CONF_ARGS
+            make -j$(nproc)
+            make install
+            cd ..
+            
+            # FLAC
+            echo "Building FLAC ($VARIANT)..."
+            cd flac
+            git clean -fdx
+            cmake -S . -B build -G "MSYS Makefiles" -DCMAKE_INSTALL_PREFIX=$PREFIX $CMAKE_ARGS -DBUILD_PROGRAMS=OFF -DBUILD_TESTING=OFF -DINSTALL_MANPAGES=OFF -DWITH_OGG=ON -DOGG_ROOT=$PREFIX
+            cmake --build build -- -j$(nproc)
+            cmake --build build --target install
+            cd ..
+          }
           
-          export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig"
-          export CPPFLAGS="-I$PREFIX/include"
-          export LDFLAGS="-L$PREFIX/lib"
-
           cd build_work
-          
-          echo "Building Ogg..."
-          cd ogg
-          ./autogen.sh
-          git reset --hard
-          ./configure --prefix=$PREFIX --enable-static --disable-shared
-          make -j$(nproc)
-          make install
-          cd ..
-          
-          echo "Building FLAC..."
-          cd flac
-          cmake -S . -B build -G "MSYS Makefiles" -DCMAKE_INSTALL_PREFIX=$PREFIX -DBUILD_SHARED_LIBS=OFF -DBUILD_PROGRAMS=OFF -DBUILD_TESTING=OFF -DINSTALL_MANPAGES=OFF -DWITH_OGG=ON -DOGG_ROOT=$PREFIX
-          cmake --build build -- -j$(nproc)
-          cmake --build build --target install
-          cd ..
+          build_variant static
+          build_variant shared
 
       - name: Package Dependencies
+        shell: bash
         run: |
-          7z a deps-flac.zip ./install_dir/*
+          cd build_work/install_dir_static && 7z a ../../deps-flac-static.zip *
+          cd ../install_dir_shared && 7z a ../../deps-flac-shared.zip *
 
-      - name: Upload Dependencies
+      - name: Upload Dependencies Static
         uses: actions/upload-artifact@v4
         with:
-          name: build-deps-flac
-          path: deps-flac.zip
+          name: build-deps-flac-static
+          path: deps-flac-static.zip
+          retention-days: 1
+          
+      - name: Upload Dependencies Shared
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-deps-flac-shared
+          path: deps-flac-shared.zip
           retention-days: 1
 
   build-deps-opus:
@@ -178,68 +205,98 @@ jobs:
       - name: Build Dependencies (Opus & Others)
         shell: msys2 {0}
         run: |
-          export CFLAGS="-O2 -static-libgcc -static-libstdc++"
-          export CXXFLAGS="-O2 -static-libgcc -static-libstdc++"
-          export PREFIX="$(pwd)/install_dir"
-          mkdir -p $PREFIX
+          build_variant() {
+            VARIANT=$1
+            if [ "$VARIANT" == "static" ]; then
+              export PREFIX="$(pwd)/install_dir_static"
+              export CFLAGS="-O2 -static-libgcc -static-libstdc++"
+              export CXXFLAGS="-O2 -static-libgcc -static-libstdc++"
+              CONF_ARGS="--enable-static --disable-shared"
+            else
+              export PREFIX="$(pwd)/install_dir_shared"
+              export CFLAGS="-O2"
+              export CXXFLAGS="-O2"
+              CONF_ARGS="--disable-static --enable-shared"
+            fi
+            
+            export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig"
+            export CPPFLAGS="-I$PREFIX/include"
+            export LDFLAGS="-L$PREFIX/lib"
+            mkdir -p $PREFIX
+            
+            # Ogg
+            echo "Building Ogg ($VARIANT)..."
+            cd ogg
+            git clean -fdx
+            ./autogen.sh
+            ./configure --prefix=$PREFIX $CONF_ARGS
+            make -j$(nproc)
+            make install
+            cd ..
+            
+            # Opus
+            echo "Building Opus ($VARIANT)..."
+            cd opus
+            git clean -fdx
+            ./autogen.sh
+            ./configure --prefix=$PREFIX $CONF_ARGS
+            make -j$(nproc)
+            make install
+            cd ..
+            
+            # Libopusenc
+            echo "Building Libopusenc ($VARIANT)..."
+            cd libopusenc
+            git clean -fdx
+            ./autogen.sh
+            ./configure --prefix=$PREFIX $CONF_ARGS
+            make -j$(nproc)
+            make install
+            cd ..
+            
+            # Opusfile
+            echo "Building Opusfile ($VARIANT)..."
+            cd opusfile
+            git clean -fdx
+            ./autogen.sh
+            ./configure --prefix=$PREFIX $CONF_ARGS --disable-http
+            make -j$(nproc)
+            make install
+            cd ..
+          }
           
-          export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig"
-          export CPPFLAGS="-I$PREFIX/include"
-          export LDFLAGS="-L$PREFIX/lib"
-
           cd build_work
-          
-          echo "Building Ogg..."
-          cd ogg
-          ./autogen.sh
-          git reset --hard
-          ./configure --prefix=$PREFIX --enable-static --disable-shared
-          make -j$(nproc)
-          make install
-          cd ..
-          
-          echo "Building Opus..."
-          cd opus
-          ./autogen.sh
-          git reset --hard
-          ./configure --prefix=$PREFIX --enable-static --disable-shared
-          make -j$(nproc)
-          make install
-          cd ..
-          
-          echo "Building Libopusenc..."
-          cd libopusenc
-          ./autogen.sh
-          git reset --hard
-          ./configure --prefix=$PREFIX --enable-static --disable-shared
-          make -j$(nproc)
-          make install
-          cd ..
-          
-          echo "Building Opusfile..."
-          cd opusfile
-          ./autogen.sh
-          git reset --hard
-          ./configure --prefix=$PREFIX --enable-static --disable-shared --disable-http
-          make -j$(nproc)
-          make install
-          cd ..
+          build_variant static
+          build_variant shared
 
       - name: Package Dependencies
+        shell: bash
         run: |
-          7z a deps-opus.zip ./install_dir/*
+          cd build_work/install_dir_static && 7z a ../../deps-opus-static.zip *
+          cd ../install_dir_shared && 7z a ../../deps-opus-shared.zip *
 
-      - name: Upload Dependencies
+      - name: Upload Dependencies Static
         uses: actions/upload-artifact@v4
         with:
-          name: build-deps-opus
-          path: deps-opus.zip
+          name: build-deps-opus-static
+          path: deps-opus-static.zip
+          retention-days: 1
+          
+      - name: Upload Dependencies Shared
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-deps-opus-shared
+          path: deps-opus-shared.zip
           retention-days: 1
 
   build-tools:
     needs: [check, build-deps-flac, build-deps-opus]
     if: needs.check.outputs.should_run == 'true'
     runs-on: windows-latest
+    strategy:
+      matrix:
+        build_type: [static, shared]
+      fail-fast: false
     steps:
       - uses: actions/checkout@v4
         with:
@@ -266,37 +323,50 @@ jobs:
             git
             mingw-w64-x86_64-toolchain
             mingw-w64-x86_64-autotools
+            groff
+            util-linux
 
       - name: Download Dependencies (FLAC)
         uses: actions/download-artifact@v4
         with:
-          name: build-deps-flac
+          name: build-deps-flac-${{ matrix.build_type }}
           path: .
 
       - name: Download Dependencies (Opus)
         uses: actions/download-artifact@v4
         with:
-          name: build-deps-opus
+          name: build-deps-opus-${{ matrix.build_type }}
           path: .
 
       - name: Extract Dependencies
         run: |
-          7z x deps-flac.zip -o"./install_dir" -y
-          7z x deps-opus.zip -o"./install_dir" -y
+          7z x deps-flac-${{ matrix.build_type }}.zip -o"./install_dir" -y
+          7z x deps-opus-${{ matrix.build_type }}.zip -o"./install_dir" -y
 
       - name: Build Opus-Tools
         shell: msys2 {0}
+        env:
+          BUILD_TYPE: ${{ matrix.build_type }}
         run: |
           export PREFIX="$(pwd)/install_dir"
           export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig"
-          export PKG_CONFIG="pkg-config --static"
-          export CFLAGS="-O2 -static-libgcc -static-libstdc++ -I$PREFIX/include -DFLAC__NO_DLL -Dfopen_utf8=opus_fopen_utf8 -Dunlink_utf8=opus_unlink_utf8"
-          export LDFLAGS="-L$PREFIX/lib -static"
+          
+          if [ "$BUILD_TYPE" == "static" ]; then
+            export PKG_CONFIG="pkg-config --static"
+            export CFLAGS="-O2 -static-libgcc -static-libstdc++ -I$PREFIX/include -DFLAC__NO_DLL -Dfopen_utf8=opus_fopen_utf8 -Dunlink_utf8=opus_unlink_utf8"
+            export LDFLAGS="-L$PREFIX/lib -static"
+            CONF_ARGS="--enable-static --disable-shared"
+          else
+            export PKG_CONFIG="pkg-config"
+            export CFLAGS="-O2 -I$PREFIX/include -Dfopen_utf8=opus_fopen_utf8 -Dunlink_utf8=opus_unlink_utf8"
+            export LDFLAGS="-L$PREFIX/lib"
+            CONF_ARGS="--disable-static --enable-shared"
+          fi
           
           cd src
           ./autogen.sh
           git reset --hard
-          ./configure --prefix=$PREFIX --enable-static --disable-shared --with-flac
+          ./configure --prefix=$PREFIX $CONF_ARGS --with-flac
           
           make -j$(nproc)
           
@@ -306,6 +376,10 @@ jobs:
           cp opusenc.exe ../release/
           cp opusdec.exe ../release/
           cp opusinfo.exe ../release/
+          
+          if [ "$BUILD_TYPE" == "shared" ]; then
+             cp $PREFIX/bin/*.dll ../release/
+          fi
 
       - name: Install Documentation Tools
         shell: powershell
@@ -341,7 +415,7 @@ jobs:
           SHA_OPUS=${SHA_OPUS:0:7}
           
           DATE=$(date +'%Y-%m-%d_%H-%M')
-          ZIP_NAME="opus-tools-${OPUS_TOOLS_SHORT}_opus-${SHA_OPUS}.zip"
+          ZIP_NAME="opus-tools-${OPUS_TOOLS_SHORT}_opus-${SHA_OPUS}-${{ matrix.build_type }}.zip"
           echo "ZIP_NAME=$ZIP_NAME" >> $GITHUB_ENV
           echo "TAG_NAME=${DATE}_${OPUS_TOOLS_SHORT}" >> $GITHUB_ENV
           echo "SHA_OPUS_TOOLS=$OPUS_TOOLS_SHA" >> $GITHUB_ENV
@@ -361,6 +435,7 @@ jobs:
           python .github/scripts/update_versions.py
 
       - name: Commit and Push upstream-version.json
+        if: matrix.build_type == 'static'
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
