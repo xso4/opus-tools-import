@@ -31,15 +31,12 @@ def main():
     updates_found = False
     
     print("Checking for updates...")
-    output_versions = {}
-
     for name, repo_data in data["repositories"].items():
         current_hash = repo_data["commit"]
         remote_url = repo_data["url"]
         
         print(f"Checking {name} ({remote_url})...")
         latest_hash = get_remote_head(remote_url)
-        output_versions[name] = latest_hash
         
         if latest_hash != current_hash:
             print(f"  UPDATE FOUND: {name} {current_hash[:7]} -> {latest_hash[:7]}")
@@ -51,10 +48,6 @@ def main():
     
     with open(os.environ["GITHUB_OUTPUT"], "a") as f:
         f.write(f"should_run={str(should_run).lower()}\n")
-        if should_run:
-            for name, sha in output_versions.items():
-                safe_name = name.replace("-", "_")
-                f.write(f"{safe_name}_sha={sha}\n")
         
     print(f"\nSummary: Manual={is_manual}, Updates={updates_found} => Run={should_run}")
 
