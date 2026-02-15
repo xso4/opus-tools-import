@@ -237,108 +237,8 @@ jobs:
           path: opus-tools-${{ matrix.type }}.zip
           retention-days: 1
 
-  build-docs:
-    needs: check-get-versions
-    if: needs.check-get-versions.outputs.should_run == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      
-      - name: Install Documentation Tools
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y doxygen pandoc autoconf automake libtool
-
-      - name: Clone Opus & Generate Docs
-        env:
-          OPUS_SHA: ${{ needs.check-get-versions.outputs.opus_sha }}
-        run: |
-          git clone https://github.com/xiph/opus.git
-          cd opus
-          git checkout $OPUS_SHA
-          
-          # Initialize build system to generate Doxyfile correctly
-          ./autogen.sh
-          ./configure --enable-doc
-          
-          # Configure Doxyfile for DocBook generation (Standard interchange format)
-          if [ -f doc/Doxyfile ]; then
-              echo "Modifying Doxyfile for DocBook generation..."
-              cat >> doc/Doxyfile <<EOF
-          
-          # Fix paths for running from doc/ directory
-          OUTPUT_DIRECTORY = .
-          STRIP_FROM_PATH = ..
-          INPUT = ../include/opus.h ../include/opus_types.h ../include/opus_defines.h ../include/opus_multistream.h ../include/opus_custom.h
-          
-          # Use DocBook as intermediate format for Pandoc
-          GENERATE_DOCBOOK = YES
-          DOCBOOK_OUTPUT = docbook
-          GENERATE_XML = NO
-          
-          # Ensure full API coverage
-          EXTRACT_ALL = YES
-          EXTRACT_PRIVATE = YES
-          EXTRACT_STATIC = YES
-          RECURSIVE = YES
-          MACRO_EXPANSION = YES
-          EXPAND_ONLY_PREDEF = NO
-          EOF
-          else
-              echo "Error: doc/Doxyfile not found after configure"
-              exit 1
-          fi
-          
-          # Build documentation
-          cd doc
-          doxygen
-          
-          if [ ! -d "html" ]; then
-             echo "Error: HTML documentation not generated"
-             exit 1
-          fi
-
-      - name: Convert & Package Docs
-        run: |
-          mkdir -p opus-docs
-          
-          # 1. Zip HTML Documentation
-          cd opus/doc
-          zip -r ../../opus-docs/opus-api-html.zip html
-          
-          # 2. Convert DocBook to Complete Markdown & Text
-          # DocBook (refman.xml) is the standard complete representation
-          if [ -d "docbook" ] && [ -f "docbook/refman.xml" ]; then
-             # Convert to Markdown (Github Flavored)
-             pandoc -f docbook -t gfm docbook/refman.xml -o ../../opus-docs/opus-api.md
-             
-             # Convert to Plain Text
-             pandoc -f docbook -t plain docbook/refman.xml -o ../../opus-docs/opus-api.txt
-          else
-             echo "Error: DocBook documentation not generated"
-             ls -R
-             exit 1
-          fi
-          
-          cd ../..
-          
-          # 3. Create a README
-          echo "Opus API Documentation" > opus-docs/README.txt
-          echo "This package contains:" >> opus-docs/README.txt
-          echo "- opus-api-html.zip: Full HTML API documentation (extract to view)" >> opus-docs/README.txt
-          echo "- opus-api.md: Complete API reference in Markdown format" >> opus-docs/README.txt
-          echo "- opus-api.txt: Complete API reference in Plain Text format" >> opus-docs/README.txt
-
-
-      - name: Upload Docs
-        uses: actions/upload-artifact@v4
-        with:
-          name: opus-docs
-          path: opus-docs/*
-          retention-days: 1
-
   update-versions:
-    needs: [check-get-versions, build-opus-tools, build-docs]
+    needs: [check-get-versions, build-opus-tools]
     if: needs.check-get-versions.outputs.should_run == 'true'
     runs-on: ubuntu-latest
     permissions:
@@ -354,12 +254,6 @@ jobs:
         with:
           pattern: opus-tools-*
           merge-multiple: true
-          path: release_assets
-
-      - name: Download Docs
-        uses: actions/download-artifact@v4
-        with:
-          name: opus-docs
           path: release_assets
 
       - name: Update upstream-version.json & Generate Notes
