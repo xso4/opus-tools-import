@@ -1,15 +1,15 @@
 {
-  "last_run_utc": "2026-04-15T20:01:50Z",
+  "last_run_utc": "2026-05-15T20:17:36Z",
   "repositories": {
     "opus": {
       "url": "https://github.com/xiph/opus.git",
-      "commit": "788cc89ce4f2c42025d8c70ec1b4457dc89cd50f",
-      "date": "2026-03-21T15:16:20Z"
+      "commit": "f8f99516092f4311a9b0784f190ff982df8eb2e6",
+      "date": "2026-05-01T19:18:03Z"
     },
     "flac": {
       "url": "https://github.com/xiph/flac.git",
-      "commit": "343f3481562213cdc4f196af87da0d26bf2530ad",
-      "date": "2026-03-25T19:45:10Z"
+      "commit": "b430c3a58b64b70642ab5c72c36084dd4083d165",
+      "date": "2026-05-08T19:15:14Z"
     },
     "ogg": {
       "url": "https://github.com/xiph/ogg.git",
@@ -18,8 +18,8 @@
     },
     "libopusenc": {
       "url": "https://github.com/xiph/libopusenc.git",
-      "commit": "3f957ca3d7305ce3d0a8cea00dd7bc59619f6940",
-      "date": "2026-02-28T22:50:18Z"
+      "commit": "3c65f440baff6220872ec11b0cbde37ef7a48f78",
+      "date": "2026-02-28T22:50:19Z"
     },
     "opusfile": {
       "url": "https://github.com/xiph/opusfile.git",
